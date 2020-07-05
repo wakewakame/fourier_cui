@@ -1,4 +1,5 @@
 #include <iostream>
+#include <string>
 #include <cstdint>
 #include <vector>
 #include <cmath>
@@ -116,7 +117,7 @@ public:
 	inline ALuint get_sample_rate() const { return sample_rate_; }
 	inline size_t get_buffer_size() const { return buffer_size_; }
 	inline int16_t* get_buffer() { return &buffer_[0]; }
-	inline float* get_buffer_f() { return &buffer_f_[0]; }
+	inline std::vector<float>& get_buffer_f() { return buffer_f_; }
 };
 
 class Fourier {
@@ -150,7 +151,8 @@ public:
 	virtual ~Fourier() {
 
 	}
-	void transform(const float* const input_buffer) {
+	void transform(const std::vector<float>& input_buffer) {
+		assert(input_buffer.size() == input_size_);
 		for(size_t output_index = 0; output_index < output_buffer_.size(); output_index++) {
 			for(size_t input_index = 0; input_index < input_size_; input_index++) {
 				float p_input  = (float)input_index / sample_rate_;
@@ -174,6 +176,48 @@ public:
 	inline std::vector<float>& get_output() { return output_buffer_; }
 };
 
+class WavePreview {
+private:
+	uint16_t width_, height_;
+	std::string output;
+	class Dot2x3 {
+	private:
+		union {
+			uint8_t c_str[4];
+			uint32_t number;
+		};
+	public:
+		Dot2x3(uint8_t num = 0) : number((*((uint32_t*)(u8"\u2800"))) + ((uint32_t)num * 0x10000)) {}
+		virtual ~Dot2x3() {}
+		operator const char* () { return (const char*)c_str; }
+	};
+
+public:
+	WavePreview(uint16_t width = 80, uint16_t height = 20) :
+		width_(width), height_(height) {}
+	virtual ~WavePreview() {}
+	void preview(const std::vector<float>& wave, const float min = 0.0f, const float max = 1.0f) {
+		preview(&wave[0], wave.size(), min, max);
+	}
+	void preview(
+		const float* wave, const size_t size,
+		const float min = 0.0f, const float max = 1.0f
+	) {
+		output.clear();
+		for(size_t y = 0; y < height_; y++) {
+			for(size_t x = 0; x < width_; x++) {
+				float value = wave[x * size / width_];
+				value = (float)height_ * (value - min) / (max - min);
+				output += ((height_ - 1 - value) < y ? "." : " ");
+			}
+			if (y != height_ - 1) output += "\n";
+		}
+		std::cout << output << std::endl;
+	}
+	inline int get_width() const { return width_; }
+	inline int get_height() const { return height_; }
+};
+
 int main()
 {
 	signal(SIGINT, exit_flag_function);
@@ -181,10 +225,13 @@ int main()
 	Recorder recorder;
 	if (recorder.init_device()) return 1;
 
+	WavePreview wave_preview;
+
 	Fourier fourier(
 		recorder.get_buffer_size(),
 		recorder.get_sample_rate(),
-		80, 0.0f, 400.0f
+		wave_preview.get_width(),
+		0.0f, 400.0f
 	);
 
 	while(!exit_flag)
@@ -197,19 +244,8 @@ int main()
 		fourier.transform(recorder.get_buffer_f());
 
 		// plot
-		const uint16_t width  = 80;
-		const uint16_t height = 20;
-		auto&& output = fourier.get_output();
 		clear();
-		for(size_t y = 0; y < height; y++) {
-			for(size_t x = 0; x < width; x++) {
-				float value = output[x * output.size() / width] * 32.0f;
-				//value = (value * 0.5f + 0.5f);
-				value *= (float)height;
-				std::cout << ((height - 1 - value) < y ? "." : " ");
-			}
-			std::cout << std::endl;
-		}
+		wave_preview.preview(fourier.get_output(), 0.0f, 0.03f);
 	}
 	
 	std::cout << "Close" << std::endl;
