@@ -176,9 +176,10 @@ public:
 	inline std::vector<float>& get_output() { return output_buffer_; }
 };
 
-class WavePreview {
+class Canvas {
 private:
 	uint16_t width_, height_;
+	std::vector<std::vector<bool>> map_;
 	std::string output;
 	class Dot2x3 {
 	private:
@@ -193,24 +194,41 @@ private:
 	};
 
 public:
-	WavePreview(uint16_t width = 80, uint16_t height = 20) :
-		width_(width), height_(height) {}
-	virtual ~WavePreview() {}
-	void preview(const std::vector<float>& wave, const float min = 0.0f, const float max = 1.0f) {
-		preview(&wave[0], wave.size(), min, max);
+	Canvas(uint16_t width = 80, uint16_t height = 20) :
+		width_(width), height_(height), map_(width * 2, std::vector<bool>(height * 3, false)) {}
+	virtual ~Canvas() {}
+	void draw(const std::vector<float>& wave, const float min = 0.0f, const float max = 1.0f) {
+		draw(&wave[0], wave.size(), min, max);
 	}
-	void preview(
+	void draw(
 		const float* wave, const size_t size,
 		const float min = 0.0f, const float max = 1.0f
 	) {
-		output.clear();
-		for(size_t y = 0; y < height_; y++) {
-			for(size_t x = 0; x < width_; x++) {
-				float value = wave[x * size / width_];
-				value = (float)height_ * (value - min) / (max - min);
-				output += ((height_ - 1 - value) < y ? "." : " ");
+		const size_t width = map_.size();
+		for(size_t x = 0; x < width; x++) {
+			const size_t height = map_[x].size();
+			for(size_t y = 0; y < height; y++) {
+				size_t index = (size * x) / width;   // = size * (x / width) < size
+				float value = wave[index];
+				value = (float)height * (value - min) / (max - min);
+				map_[x][y] = (height - 1 - value) < y;
 			}
-			if (y != height_ - 1) output += "\n";
+		}
+	}
+	void preview() {
+		output.clear();
+		for(uint16_t y = 0; y < height_; y++) {
+			for(uint16_t x = 0; x < width_; x++) {
+				uint8_t number = 
+					map_[x * 2 + 0][y * 3 + 0] * 0b000001 +
+					map_[x * 2 + 0][y * 3 + 1] * 0b000010 +
+					map_[x * 2 + 0][y * 3 + 2] * 0b000100 +
+					map_[x * 2 + 1][y * 3 + 0] * 0b001000 +
+					map_[x * 2 + 1][y * 3 + 1] * 0b010000 +
+					map_[x * 2 + 1][y * 3 + 2] * 0b100000;
+				output += Dot2x3(number);
+			}
+			if (y != (height_ - 1)) output += "\n";
 		}
 		std::cout << output << std::endl;
 	}
@@ -225,12 +243,12 @@ int main()
 	Recorder recorder;
 	if (recorder.init_device()) return 1;
 
-	WavePreview wave_preview;
+	Canvas canvas;
 
 	Fourier fourier(
 		recorder.get_buffer_size(),
 		recorder.get_sample_rate(),
-		wave_preview.get_width(),
+		canvas.get_width() * 2,
 		0.0f, 400.0f
 	);
 
@@ -244,8 +262,9 @@ int main()
 		fourier.transform(recorder.get_buffer_f());
 
 		// plot
+		canvas.draw(fourier.get_output(), 0.0f, 0.03f);
 		clear();
-		wave_preview.preview(fourier.get_output(), 0.0f, 0.03f);
+		canvas.preview();
 	}
 	
 	std::cout << "Close" << std::endl;
