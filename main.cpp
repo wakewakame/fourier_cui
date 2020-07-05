@@ -1,3 +1,13 @@
+// ToDo
+//   - Recorderのマルチスレッド化
+//       alcCaptureSamplesを呼び出す周期が遅すぎるとエラーが出るようなので。
+//
+//   - ちゃんとした終了処理の実装
+//       Ctrl+Cで終了はするが、デストラクタが呼ばれていない気がする。
+//
+//   - ちゃんとしたエラー処理の実装
+//       マイクが見つからなかったときなど
+
 #include <iostream>
 #include <string>
 #include <cstdint>
