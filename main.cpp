@@ -5,19 +5,14 @@
 #include <cmath>
 #include <cassert>
 
-#include <stdlib.h>
-#include <signal.h>
+#include <cstdlib>
 #ifdef _WIN32
 void clear() {
-	system("cls");
+	std::system("cls");
 }
 #else
-volatile sig_atomic_t exit_flag = 0;
-void exit_flag_function(int sig){
-	exit_flag = 1;
-}
 void clear() {
-	system("clear");
+	std::system("clear");
 }
 #endif
 
@@ -44,7 +39,7 @@ public:
 		free_device();
 		sample_rate_ = sample_rate;
 		buffer_size_ = buffer_size;
-		buffer_.resize(buffer_size_ * 2);
+		buffer_.resize(buffer_size_ * 2 - 1);
 		buffer_f_.resize(buffer_size_);
 		index_ = 0;
 		size_ = 0;
@@ -67,9 +62,15 @@ public:
 	}
 	int get_next() {
 		if (size_ >= buffer_size_) {
-			size_ -= buffer_size_;
-			for(size_t i = 0; i < size_; i++) {
-				buffer_[i] = buffer_[buffer_size_ + i];
+			if (size_ < 2 * buffer_size_) {
+				for(size_t i = 0; i < size_ - buffer_size_; i++) {
+					buffer_[i] = buffer_[buffer_size_ + i];
+				}
+				size_ -= buffer_size_;
+			}
+			else {
+				index_ = 0;
+				size_ = 0;
 			}
 		}
 		while(true) {
@@ -79,24 +80,19 @@ public:
 				al_nssleep(10000000);
 				continue;
 			}
-			while (count > buffer_size_) {
-				ALCint size = (count >= 2 * buffer_size_) ? buffer_size_ : count - buffer_size_;
-				alcCaptureSamples(mic_device_, &buffer_[index_], size);
-				count -= size;
-				std::cout << "count : " << count << std::endl;
+			if (buffer_.size() < index_ + count) {
+				buffer_.resize(index_ + count);
 			}
 			alcCaptureSamples(mic_device_, &buffer_[index_], count);
+			err_ = alcGetError(mic_device_);
+			if (err_ != ALC_NO_ERROR) {
+				std::cout << "Error : " << err_ << std::endl;
+				return 1;
+			}
 			index_ += count;
 			size_ += count;
-			assert(index_ < buffer_size_ * 2);
-			assert(size_ < buffer_size_ * 2);
 			if (index_ >= buffer_size_) {
 				index_ -= buffer_size_;
-				err_ = alcGetError(mic_device_);
-				if (err_ != ALC_NO_ERROR) {
-					std::cout << "Error : " << err_ << std::endl;
-					return 1;
-				}
 				return 0;
 			}
 		}
@@ -238,8 +234,6 @@ public:
 
 int main()
 {
-	signal(SIGINT, exit_flag_function);
-
 	Recorder recorder;
 	if (recorder.init_device()) return 1;
 
@@ -252,7 +246,7 @@ int main()
 		0.0f, 400.0f
 	);
 
-	while(!exit_flag)
+	while(true)
 	{
 		// get audio
 		if (recorder.get_next()) return 1;
@@ -266,7 +260,5 @@ int main()
 		clear();
 		canvas.preview();
 	}
-	
-	std::cout << "Close" << std::endl;
 	return 0;
 }
