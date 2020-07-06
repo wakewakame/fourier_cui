@@ -1,18 +1,12 @@
 // ToDo
-//   - Recorderのマルチスレッド化
-//       alcCaptureSamplesを呼び出す周期が遅すぎるとエラーが出るようなので。
-//
-//   - ちゃんとした終了処理の実装
-//       Ctrl+Cで終了はするが、デストラクタが呼ばれていない気がする。
-//
-//   - ちゃんとしたエラー処理の実装
-//       マイクが見つからなかったときなど
+//   - 精度の向上
 
 #include <iostream>
 #include <string>
 #include <cstdint>
 #include <vector>
 #include <cmath>
+#include <utility>
 #include <cassert>
 
 #include <cstdlib>
@@ -182,6 +176,24 @@ public:
 			}
 		}
 	}
+	int get_peak_index() {
+		size_t max_value_index = 0;
+		float max_value = 0.0;
+		for(size_t index = 0; index < dft_buffer_.size(); index++) {
+			if (dft_buffer_[index] > max_value) {
+				max_value = dft_buffer_[index];
+				max_value_index = index;
+			}
+		}
+		if (max_value < 0.001f) return -1;
+		return max_value_index;
+	}
+	float index_to_hz(int index) {
+		if (index < 0) return 0.0f;
+		float p_output = (float)index / (float)(dft_buffer_.size() - 1);
+		float hz = (1.0f - p_output) * min_hz_ + p_output * max_hz_;
+		return hz;
+	}
 	inline std::vector<float>& get_dft() { return dft_buffer_; }
 };
 
@@ -204,8 +216,25 @@ private:
 
 public:
 	Canvas(uint16_t width = 160, uint16_t height = 60) :
-		width_(width), height_(height), map_(width, std::vector<bool>(height, false)) {}
+		width_(width), height_(height), map_(width * 2, std::vector<bool>(height * 3, false)) {}
 	virtual ~Canvas() {}
+	void clear() {
+		for(size_t x = 0; x < map_.size(); x++) {
+			for(size_t y = 0; y < map_[x].size(); y++) {
+				map_[x][y] = false;
+			}
+		}
+	}
+	void slide() {
+		for(size_t x = 0; x < map_.size(); x++) {
+			for(size_t y = 0; y < map_[x].size() - 1; y++) {
+				map_[x][y] = map_[x][y + 1];
+			}
+		}
+		for(size_t x = 0; x < map_.size(); x++) {
+			map_[x][map_[x].size() - 1] = false;
+		}
+	}
 	void draw_wave(const std::vector<float>& wave, const float min = 0.0f, const float max = 1.0f) {
 		draw_wave(&wave[0], wave.size(), min, max);
 	}
@@ -216,11 +245,88 @@ public:
 		const size_t width = map_.size();
 		for(size_t x = 0; x < width; x++) {
 			const size_t height = map_[x].size();
-			for(size_t y = 0; y < height; y++) {
-				size_t index = (size * x) / width;   // = size * (x / width) < size
-				float value = wave[index];
-				value = (float)height * (value - min) / (max - min);
-				map_[x][y] = (height - 1 - value) < y;
+			size_t index = (size * x) / width;   // = size * (x / width) < size
+			float value = wave[index];
+			value = (float)height * (value - min) / (max - min);
+			line(
+				x, height - 1 - (int)value,
+				x, height - 1,
+				2
+			);
+		}
+	}
+	inline void point(int x, int y, int type = 1) {
+		if (
+			0 <= x && x < map_.size() &&
+			0 <= y && y < map_[x].size()
+		) {
+			if (type == 0) map_[x][y] = false;
+			if (type == 1) map_[x][y] = true;
+			if (type == 2) map_[x][y] = !map_[x][y];
+		}
+	}
+	inline void line(int x_1, int y_1, int x_2, int y_2, int type = 1) {
+		if ((x_1 == x_2) && (y_1 == y_2)) {
+			point(x_1, y_1);
+			return;
+		}
+		if (std::abs(x_2 - x_1) > std::abs(y_2 - y_1)) {
+			if (x_1 > x_2) {
+				std::swap(x_1, x_2);
+				std::swap(y_1, y_2);
+			}
+			for(int x = x_1; x <= x_2; x++) {
+				int y = (y_1 * (x_2 - x) + y_2 * (x - x_1)) / (x_2 - x_1);
+				point(x, y, type);
+			}
+		}
+		else {
+			if (y_1 > y_2) {
+				std::swap(x_1, x_2);
+				std::swap(y_1, y_2);
+			}
+			for(int y = y_1; y <= y_2; y++) {
+				int x = (x_1 * (y_2 - y) + x_2 * (y - y_1)) / (y_2 - y_1);
+				point(x, y, type);
+			}
+		}
+	}
+	inline void rect(int x_1, int y_1, int x_2, int y_2, bool fill = false, int type = 1) {
+		if (x_1 > x_2) std::swap(x_1, x_2);
+		if (y_1 > y_2) std::swap(y_1, y_2);
+		if ((x_2 - x_1 <= 2) || (y_2 - y_1 <= 2)) fill = true;
+		if (fill) {
+			for(int x = x_1; x <= x_2; x++) {
+				for(int y = y_1; y <= y_2; y++) {
+					point(x, y, type);
+				}
+			}
+		}
+		else {
+			line(x_1, y_1, x_2, y_1);
+			line(x_1, y_2, x_2, y_2);
+			line(x_1, y_1 + 1, x_1, y_2 - 1);
+			line(x_2, y_1 + 1, x_2, y_2 - 1);
+		}
+	}
+	inline void ellipse(float x, float y, float r, bool fill = false, int type = 1) {
+		if (fill) {
+			for(int x_i = (int)(x - r); x_i <= (int)(x + r); x_i++) {
+				for(int y_i = (int)(y - r); y_i <= (int)(y + r); y_i++) {
+					if (pow((float)x_i - x, 2.0f) + pow((float)y_i - y, 2.0f) < pow(r, 2.0f)) {
+						point(x_i, y_i, type);
+					}
+				}
+			}
+		}
+		else {
+			for(int i = 0; i < 16; i++) {
+				line(
+					(int)(x - r * std::cos(2.0f * std::acos(-1.0f) * (float)(i + 0) / 16.0f)),
+					(int)(y - r * std::sin(2.0f * std::acos(-1.0f) * (float)(i + 0) / 16.0f)),
+					(int)(x - r * std::cos(2.0f * std::acos(-1.0f) * (float)(i + 1) / 16.0f)),
+					(int)(y - r * std::sin(2.0f * std::acos(-1.0f) * (float)(i + 1) / 16.0f))
+				);
 			}
 		}
 	}
@@ -248,16 +354,15 @@ public:
 int main()
 {
 	Recorder recorder;
-	if (recorder.init_device()) return 1;
+	if (recorder.init_device(44100, 1024)) return 1;
 
 	Canvas canvas;
 
 	Fourier fourier(
-		recorder.get_sample_rate(),    // microphone's sample rate
-		recorder.get_buffer().size(),  // microphone's frame size
-		canvas.get_width(),            // DFT resolution
-		0.0f,                          // minimum hz
-		400.0f                         // maximum hz
+		recorder.get_sample_rate(),
+		recorder.get_buffer().size(),
+		canvas.get_width(),
+		300.0f, 3000.0f
 	);
 
 	while(true)
@@ -267,11 +372,50 @@ int main()
 
 		// transform fourier
 		fourier.transform(recorder.get_buffer());
+		int peak_index = fourier.get_peak_index();
+		float peak_hz = fourier.index_to_hz(peak_index);
+		float d_f = 12.0f * std::log2(peak_hz / 440.0f) + 9.0f + 0.5f;
+		d_f = d_f - 12.0f * std::floor(d_f / 12.0f);
+		int d_i = (int)d_f;
+		std::string d_array[] = {
+			"C",
+			"C#",
+			"D",
+			"D#",
+			"E",
+			"F",
+			"F#",
+			"G",
+			"G#",
+			"A",
+			"A#",
+			"B"
+		};
+		std::string d_c = (d_i >= 0) ? d_array[d_i] : "";
 
 		// plot
-		canvas.draw_wave(fourier.get_dft(), 0.0f, 0.03f);
+		canvas.clear();
+		const int x = (int)(20.0f * 7.0f * d_f / 12.0f);
+		if (x >= 0) {
+			canvas.line(x + 0, 45, x - 2, 55);
+			canvas.line(x - 2, 55, x + 2, 55);
+			canvas.line(x + 2, 55, x + 0, 45);
+		}
+		const int w = 20, h = 40;
+		for(int i = 0; i < 7; i++) {
+			canvas.rect(i * w, 0, (i + 1) * w - 1, h, false, 1);
+			if (i != 2 && i != 6) {
+				canvas.rect(i * w + w * 3 / 4, 0, (i + 1) * w + w / 4, h * 3 / 5, true, 1);
+			}
+		}
+		//canvas.draw_wave(recorder.get_buffer(), -0.1f, 0.1f);
+		//canvas.draw_wave(fourier.get_dft(), 0.0f, 0.03f);
+		//canvas.point(peak_index, 59);
+		//canvas.ellipse(20.0f * 7.0f * d_f / 12.0f, 50.0f, 5.0f);
+
 		clear();
 		canvas.preview();
+		std::cout << d_c << std::endl;
 	}
 	return 0;
 }

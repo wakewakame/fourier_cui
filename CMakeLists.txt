@@ -16,3 +16,13 @@ target_include_directories(fourier PRIVATE
 	"${CMAKE_SOURCE_DIR}/openal/examples"
 )
 target_link_libraries(fourier OpenAL)
+
+add_executable(piano
+	"${CMAKE_SOURCE_DIR}/piano.cpp"
+	"${CMAKE_SOURCE_DIR}/openal/examples/common/alhelpers.c"
+)
+target_include_directories(piano PRIVATE
+	"${CMAKE_SOURCE_DIR}/openal/include"
+	"${CMAKE_SOURCE_DIR}/openal/examples"
+)
+target_link_libraries(piano OpenAL)
