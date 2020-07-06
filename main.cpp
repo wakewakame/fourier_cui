@@ -403,18 +403,23 @@ int main()
 		///*
 		//canvas.slide();
 		canvas.clear();
-		//canvas.draw(recorder.get_buffer_f(), -0.1f, 0.1f);
-		//canvas.draw(fourier.get_output(), 0.0f, 0.03f);
-		//canvas.point(peak_index, 59);
-		canvas.ellipse(20.0f * 7.0f * d_f / 12.0f, 40.0f, 5.0f);
-
+		const int x = (int)(20.0f * 7.0f * d_f / 12.0f);
+		if (x >= 0) {
+			canvas.line(x + 0, 45, x - 2, 55);
+			canvas.line(x - 2, 55, x + 2, 55);
+			canvas.line(x + 2, 55, x + 0, 45);
+		}
 		const int w = 20, h = 40;
 		for(int i = 0; i < 7; i++) {
 			canvas.rect(i * w, 0, (i + 1) * w - 1, h, false, 1);
 			if (i != 2 && i != 6) {
-				canvas.rect(i * w + w * 3 / 4, 0, (i + 1) * w + w / 4, h / 2, true, 1);
+				canvas.rect(i * w + w * 3 / 4, 0, (i + 1) * w + w / 4, h * 3 / 5, true, 1);
 			}
 		}
+		//canvas.draw(recorder.get_buffer_f(), -0.1f, 0.1f);
+		//canvas.draw(fourier.get_output(), 0.0f, 0.03f);
+		//canvas.point(peak_index, 59);
+		//canvas.ellipse(20.0f * 7.0f * d_f / 12.0f, 50.0f, 5.0f);
 
 		clear();
 		canvas.preview();
