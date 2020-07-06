@@ -103,15 +103,13 @@ public:
 			size_ += count;
 			if (index_ >= buffer_size_) {
 				index_ -= buffer_size_;
-				return 0;
+				break;
 			}
 		}
-		return 0;
-	}
-	void convert_float() {
 		for(size_t i = 0; i < buffer_f_.size(); i++) {
 			buffer_f_[i] = (float)buffer_[i] / (float)INT16_MAX;
 		}
+		return 0;
 	}
 	void free_device() {
 		if (!mic_device_) return;
@@ -121,65 +119,70 @@ public:
 		return;
 	}
 	inline ALuint get_sample_rate() const { return sample_rate_; }
-	inline size_t get_buffer_size() const { return buffer_size_; }
-	inline int16_t* get_buffer() { return &buffer_[0]; }
-	inline std::vector<float>& get_buffer_f() { return buffer_f_; }
+	inline std::vector<float>& get_buffer() { return buffer_f_; }
 };
 
 class Fourier {
 private:
 	struct SinCos {
 		float sin = 0, cos = 0;
-		SinCos operator +=(const SinCos& right_value) {
+		SinCos() {}
+		SinCos(float sin, float cos) : sin(sin), cos(cos) {}
+		virtual ~SinCos() {}
+		SinCos operator+=(const SinCos& right_value) {
 			this->sin += right_value.sin;
 			this->cos += right_value.cos;
 			return *this;
 		}
+		SinCos operator*(const float& right_value) {
+			return SinCos{sin * right_value, cos * right_value};
+		}
+		float length() { return std::sqrt( sin * sin + cos * cos ); }
 	};
 	size_t input_size_;
 	float sample_rate_;
-	std::vector<float> output_buffer_;
-	std::vector<std::vector<SinCos>> convolution_map_;
+	std::vector<float> dft_buffer_;
+	std::vector<std::vector<SinCos>> matrix_;
 	float min_hz_;
 	float max_hz_;
 	const float pi = std::acos(-1.0f);
 
 public:
-	Fourier(uint16_t input_size = 1024, float sample_rate = 44100.0f, uint16_t output_size = 1024, float min_hz = 1.0f, float max_hz = 1024.0f) :
-		sample_rate_(sample_rate), min_hz_(min_hz), max_hz_(max_hz)
-	{
-		assert(input_size >= 2);
-		assert(output_size >= 2);
-		input_size_ = input_size;
-		output_buffer_.resize(output_size);
-		convolution_map_.resize(output_buffer_.size(), std::vector<SinCos>(input_size_));
+	Fourier(float sample_rate = 44100.0f, uint16_t input_size = 1024, uint16_t dft_resolution = 1024, float min_hz = 1.0f, float max_hz = 1024.0f) {
+		reset(sample_rate, input_size, dft_resolution, min_hz, max_hz);
 	}
-	virtual ~Fourier() {
-
-	}
+	virtual ~Fourier() {}
 	void transform(const std::vector<float>& input_buffer) {
 		assert(input_buffer.size() == input_size_);
-		for(size_t output_index = 0; output_index < output_buffer_.size(); output_index++) {
+		for(size_t output_index = 0; output_index < dft_buffer_.size(); output_index++) {
+			SinCos value;
 			for(size_t input_index = 0; input_index < input_size_; input_index++) {
-				float p_input  = (float)input_index / sample_rate_;
-				float p_output = (float)output_index / (float)(output_buffer_.size() - 1);
-				float hz = (1.0f - p_output) * min_hz_ + p_output * max_hz_;
-				float omega = hz * p_input * 2.0f * pi;
-				convolution_map_[output_index][input_index].sin = std::sin(omega) * input_buffer[input_index];
-				convolution_map_[output_index][input_index].cos = std::cos(omega) * input_buffer[input_index];
+				value += matrix_[output_index][input_index] * input_buffer[input_index];
 			}
-		}
-		for(size_t output_index = 0; output_index < output_buffer_.size(); output_index++) {
-			for(size_t input_index = 1; input_index < input_size_; input_index++) {
-				convolution_map_[output_index][0] += convolution_map_[output_index][input_index];
-			}
-			output_buffer_[output_index] = std::sqrt(
-				std::pow(convolution_map_[output_index][0].sin, 2.0f) +
-				std::pow(convolution_map_[output_index][0].cos, 2.0f)
-			) / (float)input_size_;
+			dft_buffer_[output_index] = value.length() / (float)input_size_;
 		}
 	}
-	inline std::vector<float>& get_output() { return output_buffer_; }
+	void reset(float sample_rate = 44100.0f, uint16_t input_size = 1024, uint16_t dft_resolution = 1024, float min_hz = 1.0f, float max_hz = 1024.0f) {
+		assert(input_size >= 2);
+		assert(dft_resolution >= 2);
+		input_size_ = input_size;
+		sample_rate_ = sample_rate;
+		min_hz_ = min_hz;
+		max_hz_ = max_hz;
+		dft_buffer_.resize(dft_resolution);
+		matrix_.resize(dft_buffer_.size(), std::vector<SinCos>(input_size_));
+		for(size_t output_index = 0; output_index < dft_buffer_.size(); output_index++) {
+			for(size_t input_index = 0; input_index < input_size_; input_index++) {
+				float p_input  = (float)input_index / sample_rate_;
+				float p_output = (float)output_index / (float)(dft_buffer_.size() - 1);
+				float hz = (1.0f - p_output) * min_hz_ + p_output * max_hz_;
+				float omega = hz * p_input * 2.0f * pi;
+				matrix_[output_index][input_index].sin = std::sin(omega);
+				matrix_[output_index][input_index].cos = std::cos(omega);
+			}
+		}
+	}
+	inline std::vector<float>& get_output() { return dft_buffer_; }
 };
 
 class Canvas {
@@ -200,13 +203,13 @@ private:
 	};
 
 public:
-	Canvas(uint16_t width = 80, uint16_t height = 20) :
-		width_(width), height_(height), map_(width * 2, std::vector<bool>(height * 3, false)) {}
+	Canvas(uint16_t width = 160, uint16_t height = 60) :
+		width_(width), height_(height), map_(width, std::vector<bool>(height, false)) {}
 	virtual ~Canvas() {}
-	void draw(const std::vector<float>& wave, const float min = 0.0f, const float max = 1.0f) {
-		draw(&wave[0], wave.size(), min, max);
+	void draw_wave(const std::vector<float>& wave, const float min = 0.0f, const float max = 1.0f) {
+		draw_wave(&wave[0], wave.size(), min, max);
 	}
-	void draw(
+	void draw_wave(
 		const float* wave, const size_t size,
 		const float min = 0.0f, const float max = 1.0f
 	) {
@@ -223,8 +226,8 @@ public:
 	}
 	void preview() {
 		output.clear();
-		for(uint16_t y = 0; y < height_; y++) {
-			for(uint16_t x = 0; x < width_; x++) {
+		for(uint16_t y = 0; y < (height_ / 3); y++) {
+			for(uint16_t x = 0; x < (width_ / 2); x++) {
 				uint8_t number = 
 					map_[x * 2 + 0][y * 3 + 0] * 0b000001 +
 					map_[x * 2 + 0][y * 3 + 1] * 0b000010 +
@@ -234,7 +237,7 @@ public:
 					map_[x * 2 + 1][y * 3 + 2] * 0b100000;
 				output += Dot2x3(number);
 			}
-			if (y != (height_ - 1)) output += "\n";
+			if (y != ((height_ / 3) - 1)) output += "\n";
 		}
 		std::cout << output << std::endl;
 	}
@@ -250,23 +253,23 @@ int main()
 	Canvas canvas;
 
 	Fourier fourier(
-		recorder.get_buffer_size(),
-		recorder.get_sample_rate(),
-		canvas.get_width() * 2,
-		0.0f, 400.0f
+		recorder.get_sample_rate(),    // microphone's sample rate
+		recorder.get_buffer().size(),  // microphone's frame size
+		canvas.get_width(),            // DFT resolution
+		0.0f,                          // minimum hz
+		400.0f                         // maximum hz
 	);
 
 	while(true)
 	{
 		// get audio
 		if (recorder.get_next()) return 1;
-		recorder.convert_float();
 
 		// transform fourier
-		fourier.transform(recorder.get_buffer_f());
+		fourier.transform(recorder.get_buffer());
 
 		// plot
-		canvas.draw(fourier.get_output(), 0.0f, 0.03f);
+		canvas.draw_wave(fourier.get_output(), 0.0f, 0.03f);
 		clear();
 		canvas.preview();
 	}
