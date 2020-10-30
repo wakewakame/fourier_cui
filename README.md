@@ -1,5 +1,5 @@
 # Fourier CUI
-![demo](https://github.com/wakewakame/fourier_cui/blob/master/demo/demo.gif?raw=true)  
+![demo](demo/demo.gif)  
 大学3年生の頃に作ったプログラムです。  
 CUIでマイクのDFT波形が見れます。  
 
